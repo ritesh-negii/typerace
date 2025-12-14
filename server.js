@@ -25,6 +25,23 @@ const sampleTexts = [
   "The best time to plant a tree was twenty years ago, the second best time is now."
 ];
 
+// Helper functions - SERVER VALIDATES EVERYTHING
+const calculateWPM = (text, timeInSeconds) => {
+  const words = text.trim().split(/\s+/).length;
+  const minutes = timeInSeconds / 60;
+  return Math.round(words / minutes) || 0;
+};
+
+const calculateAccuracy = (typed, target) => {
+  if (!typed) return 100;
+  let correct = 0;
+  const minLength = Math.min(typed.length, target.length);
+  for (let i = 0; i < minLength; i++) {
+    if (typed[i] === target[i]) correct++;
+  }
+  return Math.round((correct / typed.length) * 100);
+};
+
 app.prepare().then(() => {
   const server = createServer(async (req, res) => {
     const parsedUrl = parse(req.url, true);
@@ -53,9 +70,13 @@ app.prepare().then(() => {
           name: playerName,
           progress: 0,
           wpm: 0,
-          finished: false
+          accuracy: 100,
+          finished: false,
+          startTime: null,
+          typedText: ''
         }],
-        gameStarted: false
+        gameStarted: false,
+        winner: null
       });
 
       socket.join(roomCode);
@@ -69,12 +90,12 @@ app.prepare().then(() => {
       const room = rooms.get(roomCode);
 
       if (!room) {
-        socket.emit('error', { message: 'Room not found' });
+        socket.emit('room-error', { message: 'Room not found' });
         return;
       }
 
       if (room.players.length >= 2) {
-        socket.emit('error', { message: 'Room is full' });
+        socket.emit('room-error', { message: 'Room is full' });
         return;
       }
 
@@ -83,47 +104,90 @@ app.prepare().then(() => {
         name: playerName,
         progress: 0,
         wpm: 0,
-        finished: false
+        accuracy: 100,
+        finished: false,
+        startTime: null,
+        typedText: ''
       });
 
       socket.join(roomCode);
       
       // Start game when 2 players
       room.gameStarted = true;
+      const startTime = Date.now();
+      
+      // Set start time for both players
+      room.players.forEach(p => p.startTime = startTime);
+      
       io.to(roomCode).emit('game-start', {
         text: room.text,
-        players: room.players
+        players: room.players.map(p => ({ id: p.id, name: p.name }))
       });
 
       console.log(`Player joined: ${roomCode}, Players: ${room.players.length}`);
     });
 
-    // Update progress
+    // Update progress - SERVER CALCULATES EVERYTHING
     socket.on('update-progress', (data) => {
-      const { roomCode, progress, wpm, accuracy } = data;
+      const { roomCode, typedText } = data;
       const room = rooms.get(roomCode);
 
-      if (!room) return;
+      if (!room || !room.gameStarted) return;
 
       const player = room.players.find(p => p.id === socket.id);
-      if (player) {
-        player.progress = progress;
-        player.wpm = wpm;
-        player.accuracy = accuracy;
+      if (!player) return;
 
-        // Broadcast to other players
-        socket.to(roomCode).emit('opponent-update', {
-          progress,
-          wpm,
-          accuracy
+      // Store typed text
+      player.typedText = typedText;
+
+      // SERVER CALCULATES (anti-cheat)
+      const progress = (typedText.length / room.text.length) * 100;
+      player.progress = Math.min(progress, 100);
+
+      const timeElapsed = (Date.now() - player.startTime) / 1000;
+      player.wpm = calculateWPM(typedText, timeElapsed);
+      player.accuracy = calculateAccuracy(typedText, room.text);
+
+      // Broadcast to opponent
+      socket.to(roomCode).emit('opponent-update', {
+        progress: player.progress,
+        wpm: player.wpm,
+        accuracy: player.accuracy
+      });
+
+      // Check if finished (SERVER DECIDES)
+      if (typedText === room.text && !player.finished) {
+        player.finished = true;
+        
+        // Check if this player won
+        const otherPlayer = room.players.find(p => p.id !== socket.id);
+        const won = !otherPlayer.finished;
+        
+        if (won && !room.winner) {
+          room.winner = socket.id;
+        }
+
+        // Notify both players
+        io.to(roomCode).emit('player-finished', {
+          playerId: socket.id,
+          playerName: player.name,
+          stats: {
+            wpm: player.wpm,
+            accuracy: player.accuracy,
+            progress: player.progress
+          }
         });
 
-        // Check if finished
-        if (progress >= 100 && !player.finished) {
-          player.finished = true;
-          io.to(roomCode).emit('player-finished', {
-            playerId: socket.id,
-            playerName: player.name
+        // If both finished, send game over
+        if (room.players.every(p => p.finished)) {
+          io.to(roomCode).emit('game-over', {
+            winner: room.winner,
+            players: room.players.map(p => ({
+              id: p.id,
+              name: p.name,
+              wpm: p.wpm,
+              accuracy: p.accuracy
+            }))
           });
         }
       }
