@@ -84,48 +84,52 @@ app.prepare().then(() => {
       console.log(`Room created: ${roomCode}`);
     });
 
-    // Join room
-    socket.on('join-room', (data) => {
-      const { roomCode, playerName } = data;
-      const room = rooms.get(roomCode);
+  // Join room
+socket.on('join-room', (data) => {
+  const { roomCode, playerName } = data;
+  const room = rooms.get(roomCode);
 
-      if (!room) {
-        socket.emit('room-error', { message: 'Room not found' });
-        return;
-      }
+  if (!room) {
+    socket.emit('room-error', { message: 'Room not found' });
+    return;
+  }
 
-      if (room.players.length >= 2) {
-        socket.emit('room-error', { message: 'Room is full' });
-        return;
-      }
+  if (room.players.length >= 2) {
+    socket.emit('room-error', { message: 'Room is full' });
+    return;
+  }
 
-      room.players.push({
-        id: socket.id,
-        name: playerName,
-        progress: 0,
-        wpm: 0,
-        accuracy: 100,
-        finished: false,
-        startTime: null,
-        typedText: ''
-      });
+  room.players.push({
+    id: socket.id,
+    name: playerName,
+    progress: 0,
+    wpm: 0,
+    accuracy: 100,
+    finished: false,
+    startTime: null,
+    typedText: ''
+  });
 
-      socket.join(roomCode);
-      
-      // Start game when 2 players
-      room.gameStarted = true;
-      const startTime = Date.now();
-      
-      // Set start time for both players
-      room.players.forEach(p => p.startTime = startTime);
-      
-      io.to(roomCode).emit('game-start', {
-        text: room.text,
-        players: room.players.map(p => ({ id: p.id, name: p.name }))
-      });
+  socket.join(roomCode);
+  
+  // Start game when 2 players
+  room.gameStarted = true;
+  const startTime = Date.now();
+  
+  // Set start time for both players
+  room.players.forEach(p => p.startTime = startTime);
+  
+  const gameStartData = {
+    text: room.text,
+    players: room.players.map(p => ({ id: p.id, name: p.name }))
+  };
 
-      console.log(`Player joined: ${roomCode}, Players: ${room.players.length}`);
-    });
+  // Emit to BOTH room and directly to joiner (prevents race condition)
+  io.to(roomCode).emit('game-start', gameStartData);
+  socket.emit('game-start', gameStartData);
+
+  console.log(`Player joined: ${roomCode}, Players: ${room.players.length}`);
+});
 
     // Update progress - SERVER CALCULATES EVERYTHING
     socket.on('update-progress', (data) => {

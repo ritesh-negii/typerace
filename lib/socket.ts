@@ -21,3 +21,15 @@ export const disconnectSocket = () => {
     socket = null;
   }
 };
+
+socket = io('http://localhost:3000', {
+  transports: ['websocket', 'polling']
+});
+
+socket.on('connect', () => {
+  console.log('✅ Socket connected:', socket?.id);
+});
+
+socket.on('connect_error', (err) => {
+  console.error('❌ Socket connect error:', err.message);
+});
