@@ -26,7 +26,7 @@ app.prepare().then(() => {
 
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
+      origin: "https://typerace-virid.vercel.app",
       methods: ["GET", "POST"]
     }
   });
