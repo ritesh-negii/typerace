@@ -1,3 +1,6 @@
+## 🌍 Live Demo
+https://typerace-virid.vercel.app/
+
 🏁 TypeRace – Real-Time Multiplayer Typing Game
 
 TypeRace is a real-time 1v1 competitive typing game where two players race against each other to complete a typing challenge as fast and accurately as possible.
